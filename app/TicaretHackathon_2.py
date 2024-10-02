@@ -1,20 +1,20 @@
 import streamlit as st
 from PIL import Image, ImageDraw, ImageOps
 import requests
-import io
 from io import BytesIO
+from tempfile import NamedTemporaryFile
 from streamlit_image_select import image_select
 from services import UserService
-
+import time  # Bu satırı ekledik
 import sys
 import os
 
-# Add the path to Vision Model folder
-vision_model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../Vision Model'))
-sys.path.append(vision_model_path)
-
-# Now you can import the image processing pipeline
-import image_processing_pipeline as ipp
+# VisionModel dizininin mutlak yolunu alıyoruz
+vision_model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'VisionModel'))
+# Bu yolu Python arama yoluna ekliyoruz
+if vision_model_path not in sys.path:
+    sys.path.append(vision_model_path)
+from image_processing_pipeline import process_image_pipeline
 
 user_service = UserService()
 
@@ -37,13 +37,7 @@ st.markdown(
 # Oturum durumları için varsayılan değerleri ayarla
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
-    
-if 'page' not in st.session_state:
-    st.session_state.page = 'login'    
-    
-if 'processed_image' not in st.session_state:
-    st.session_state.processed_image = None
-    
+
 if 'navigation_initialized' not in st.session_state:
     st.session_state['navigation_initialized'] = False
 
@@ -180,61 +174,55 @@ def page_1():
         elif not text_input.strip():
             st.write("Lütfen ürününüz için bir açıklama yazın.")
         else:
-            # Resmi kaydet
-            image_bytes = st.session_state.uploaded_file.read()
-            image = Image.open(BytesIO(image_bytes))
-            input_image_path = f"temp_uploaded_image_{st.session_state.uploaded_file.name}"
-            image.save(input_image_path)
-
-            # Resim işlemesi sırasında loading spinner göster
-            with st.spinner('Resim işleniyor... Lütfen bekleyin.'):
-                # Image processing pipeline'ını çalıştır ve sonuç resmini al
-                prompt = "Replace the background with a soft, neutral-colored surface."
-                processed_image = process_image_pipeline(input_image_path, prompt)
-
-                # İşlenen resmi kaydet
-                processed_image_path = f"processed_{st.session_state.uploaded_file.name}"
-                processed_image.save(processed_image_path)
-
-            # İşlenen resmi session_state'e kaydet
-            st.session_state.processed_image_path = processed_image_path
             st.session_state.page = 2
-                
-                
-# Sayfa 2: Resim, kaydırma çubukları ve butonlar
+            st.rerun()
+
+
+# Sayfa 2: Yükleme işlemi ve görsel işleme.
 def page_2():
-    """Sayfa 2: İşlenmiş ve orijinal resimleri göster."""
-    st.title("Page 2: Resim Karşılaştırması")
-
-    if st.session_state.uploaded_file is None:
-        st.write("Lütfen geri dönüp bir resim yükleyin.")
-        return
-
+    """Sayfa 2: Yüklenen resmi işleyip sonuçları gösterir."""
+    st.title("Image Processing: Before and After")
+    
     col1, col2 = st.columns(2)
 
-    # Orijinal resim
+    # Solda yüklenen dosyanın resmini göster
     with col1:
-        st.image(st.session_state.uploaded_file, caption="Orijinal Resim", use_column_width=True)
-
-    # İşlenen resim
-    with col2:
-        if 'processed_image_path' in st.session_state:
-            processed_image_path = st.session_state.processed_image_path
-            st.image(processed_image_path, caption="İşlenmiş Resim", use_column_width=True)
+        st.subheader("Uploaded Image")
+        if st.session_state.uploaded_file is not None:
+            st.image(st.session_state.uploaded_file, caption="Original Image", use_column_width=True)
         else:
-            st.write("Resim işleme tamamlanmadı.")
+            st.write("Lütfen bir resim yükleyin.")
 
-    if st.button("Geri Dön"):
-        st.session_state.page = 1
-        
-        
-    # Sağdaki resmi göster
-    with col3:
-        st.image(raw_output_image, caption="Right Image", use_column_width=True)
+    # Sağda işlem sonrası resmi göster
+    with col2:
+        st.subheader("Processed Image")
+        if st.session_state.uploaded_file is not None:
+            # Yükleme sırasında spinner göstermek
+            with st.spinner("Processing the image..."):
+                # Geçici dosya oluşturma
+                image = Image.open(st.session_state.uploaded_file)
+                with NamedTemporaryFile(delete=False, suffix=".png") as temp_file:
+                    image.save(temp_file.name)
+                    temp_image_path = temp_file.name
 
+                # İşleme sokulmuş resim
+                processed_image = process_image_pipeline(
+                    temp_image_path,
+                    "Replace the background with a scene inspired by the richness of local heritage, incorporating warm, rustic tones like wooden textures or handwoven fabrics. The background should evoke a sense of tradition and authenticity, enhancing the product's connection to its roots without overpowering its appeal."
+                )
+                time.sleep(3)  # İşlem simülasyonu için bekleme süresi
+
+                # İşleme sokulan resmi göster
+                st.image(processed_image, caption="Processed Image", use_column_width=True)
+            
+        else:
+            st.write("İşlenecek bir resim yükleyin.")
+
+    # Sonraki adım butonu
     if st.button("İlerle", key="next_to_3"):
         st.session_state.page = 3
         st.rerun()
+
 
 
 # Sayfa 3: Resim seçimi
@@ -253,12 +241,12 @@ def page_3():
         ]
 
         image_paths = [
-            "../Images/salca1.jpg",
-            "../Images/salca2.png",
-            "../Images/salca3.jpg",
-            "../Images/salca4.jpg",
-            "../Images/salca5.jpg",
-            "../Images/salca6.jpg"
+            r"Images/salca1.jpg",
+            r"Images/salca2.png",
+            r"Images/salca3.jpg",
+            r"Images/salca4.jpg",
+            r"Images/salca5.jpg",
+            r"Images/salca6.jpg"
         ]
 
         st.session_state.images_array = [Image.open(path) for path in image_paths]
