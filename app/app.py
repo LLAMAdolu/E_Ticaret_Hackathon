@@ -87,9 +87,11 @@ def login():
     with col1:
         if st.button("Giriş"):
             # Kullanıcı doğrulama işlemi
-            if user_service.check_login(username, password):
+            logged, user_id = user_service.check_login(username, password)
+            if logged:
                 st.success(f"Başarıyla giriş yaptınız!")
                 st.session_state.page = 1  # Başarıyla giriş yapıldıysa ana sayfaya yönlendir
+                st.session_state['user_id'] = user_id
                 st.rerun()
             else:
                 st.error("Kullanıcı adı veya şifre yanlış")
@@ -223,7 +225,25 @@ def page_2():
                         temp_image_path,
                         "Replace the background with a scene inspired by the richness of local heritage, incorporating warm, rustic tones like wooden textures or handwoven fabrics. The background should evoke a sense of tradition and authenticity, enhancing the product's connection to its roots without overpowering its appeal."
                     )
-                    time.sleep(3)  # İşlem simülasyonu için bekleme süresi
+                    
+                    # Klasör oluştur ve dosya kaydet
+                    user_id = st.session_state['user_id']  # Replace this with the actual user ID
+                    folder_path = f"imgs/user_{user_id}"
+                    
+                    if not os.path.exists(folder_path):
+                        os.makedirs(folder_path)
+                
+                    # Mevcut dosyaları kontrol et ve uygun index bul
+                    existing_files = [f for f in os.listdir(folder_path) if f.endswith("_generated.png")]
+                    index = len(existing_files) + 1  # İndeksi mevcut dosyalara göre bul
+                
+                    new_filename = f"{index}_generated.png"
+                    
+                    # Dosya yolunu oluştur ve kaydet
+                    save_path = os.path.join(folder_path, new_filename)
+                    processed_image.save(save_path)
+    
+                    time.sleep(0.1)  # İşlem simülasyonu için bekleme süresi
 
                     # İşlenmiş resmi session_state'e kaydet
                     st.session_state.processed_image = processed_image
@@ -318,72 +338,59 @@ def page_4():
 
 # Sayfa yönlendirme
 def navigation():
-    col1_, col2_, col3 = st.columns([1,2,1])
-
-    with col2_:
-        current_page = st.session_state.get("page", 0)
-
-        # CSS stilini markdown ile tanımlıyoruz
-        st.markdown(
-            """
-            <style>
-            .nav-box {
-                display: inline-block;
-                padding: 10px 20px;
-                margin: 5px;
-                text-align: center;
-                font-size: 20px;
-                font-weight: bold;
-                cursor: pointer;
-                border-radius: 10px;
-                border: 2px solid #000;
-                width: 50px;
-                height: 50px;
-            }
-            .active {
-                background-color: #4CAF50; /* Aktif sayfa için renk */
-                color: white;
-            }
-            .inactive {
-                background-color: #343541; /* Pasif sayfalar için şeffaf */
-                color: white;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
-
-        # Sayfa numaraları için HTML kodu oluşturuyoruz
-        pages = [1, 2, 3, 4]
-        page_html = ""
-
-        for page in pages:
-            if current_page == page:
-                # Aktif sayfa için kutuyu renklendiriyoruz
-                page_html += f'<div class="nav-box active" onclick="window.location.href=\'#{page}\'">{page}</div>'
-            else:
-                # Diğer sayfalar için kutular şeffaf kalacak
-                page_html += f'<div class="nav-box inactive" onclick="window.location.href=\'#{page}\'">{page}</div>'
-
-        # HTML'i sayfada render ediyoruz
-        st.markdown(page_html, unsafe_allow_html=True)
-
-        # JavaScript ile sayfa yönlendirmesi yapıyoruz
-        st.markdown(
-            """
-            <script>
-            const elements = document.querySelectorAll('.nav-box');
-            elements.forEach(element => {
-                element.addEventListener('click', () => {
-                    const pageNumber = element.innerText;
-                    window.parent.postMessage({type: "streamlit:setSessionState", sessionState: {page: parseInt(pageNumber)}}, "*");
-                });
-            });
-            </script>
-            """,
-            unsafe_allow_html=True
+    st.markdown(
+        """
+        <style>
+        .nav-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .nav-box {
+            display: inline-block;
+            padding: 10px 20px;
+            margin: 5px;
+            text-align: center;
+            font-size: 20px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 10px;
+            border: 2px solid #000;
+            width: 50px;
+            height: 50px;
+        }
+        .active {
+            background-color: #4CAF50; /* Active page color */
+            color: white;
+        }
+        .inactive {
+            background-color: #343541; /* Inactive page color */
+            color: white;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
     )
-        
+
+    # Page numbers navigation bar with flexbox container
+    pages = [1, 2, 3, 4]
+    page_html = '<div class="nav-container">'  # Flexbox container
+
+    for page in pages:
+        if st.session_state.page == page:
+            # Highlight active page
+            page_html += f'<div class="nav-box active" onclick="window.location.href=\'#{page}\'">{page}</div>'
+        else:
+            # Inactive pages
+            page_html += f'<div class="nav-box inactive" onclick="window.location.href=\'#{page}\'">{page}</div>'
+
+    page_html += '</div>'  # Close flexbox container
+
+    # Render the HTML for the navigation bar
+    st.markdown(page_html, unsafe_allow_html=True)
+
+     
         
 # Sayfa durum kontrolü
 if "page" not in st.session_state:
