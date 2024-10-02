@@ -8,6 +8,8 @@ from services import UserService
 import time  # Bu satırı ekledik
 import sys
 import os
+import products
+
 
 # VisionModel dizininin mutlak yolunu alıyoruz
 vision_model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'VisionModel'))
@@ -89,6 +91,7 @@ def login():
             # Kullanıcı doğrulama işlemi
             logged, user_id = user_service.check_login(username, password)
             if logged:
+                st.session_state['logged_in'] = True
                 st.success(f"Başarıyla giriş yaptınız!")
                 st.session_state.page = 1  # Başarıyla giriş yapıldıysa ana sayfaya yönlendir
                 st.session_state['user_id'] = user_id
@@ -414,3 +417,42 @@ else:
     elif st.session_state.page == 4:
         navigation()
         page_4()
+    elif st.session_state.page == "My Products":
+        products.show_products()
+    elif st.session_state.page == "All Products":
+        products.show_products()
+    elif st.session_state.page == 'product_detail':
+        products.show_product_detail()
+
+
+with st.sidebar:
+# CSS ile buton yazılarını sola hizalama
+    st.markdown("""
+    <style>
+    .stButton>button {
+        display: flex;
+        justify-content: flex-start;  /* Buton içindeki metni sola hizalar */
+        width: 100%;        /* Buton genişliğini ayarlamak için */
+        margin: 0 auto;     /* Butonu ortalamak için */
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    if st.button("Giriş", key = "Giriş_sidebar"):
+        st.session_state.page = "login"  # Başarıyla giriş yapıldıysa ana sayfaya yönlendir
+        st.rerun()
+    if st.button("Ürün Ekle", key = "ÜrünEkle_sidebar"):
+        if st.session_state['logged_in'] == True:
+            st.session_state.page = 1  # Başarıyla giriş yapıldıysa ana sayfaya yönlendir
+            st.rerun()
+        else:
+            st.write("Lütfen Giriş Yapınız")
+    if st.button("Ürünlerim", key = "Ürünlerim_sidebar"):
+        if st.session_state['logged_in'] == True:
+            st.session_state.page = "My Products"  # Başarıyla giriş yapıldıysa ana sayfaya yönlendir
+            st.rerun()
+        else:
+            st.write("Lütfen Giriş Yapınız")
+    if st.button("Tüm Ürünler", key = "TümÜrünler_sidebar"):
+        st.session_state.page = "All Products"  # Başarıyla giriş yapıldıysa ana sayfaya yönlendir
+        st.rerun()
+        st.write("Lütfen Giriş Yapınız")
