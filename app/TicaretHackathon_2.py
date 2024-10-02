@@ -184,6 +184,7 @@ def page_2():
     st.title("Image Processing: Before and After")
     
     col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns([2,1,2])
 
     # Solda yüklenen dosyanın resmini göster
     with col1:
@@ -192,9 +193,22 @@ def page_2():
             st.image(st.session_state.uploaded_file, caption="Original Image", use_column_width=True)
         else:
             st.write("Lütfen bir resim yükleyin.")
+            
+    with col2:
+        # Kaydırma çubukları ve butonlar
+        slider1 = st.slider("Slider 1", 0, 100, 50)
+        slider2 = st.slider("Slider 2", 0, 100, 50)
+        slider3 = st.slider("Slider 3", 0, 100, 50)
+        
+        button_cols = st.columns(4)
+        for i in range(4):
+            with button_cols[i]:
+                if st.button(f"{i+1}"):
+                    st.write(f"{i+1} pressed")        
 
     # Sağda işlem sonrası resmi göster
     with col2:
+    with col3:
         st.subheader("Processed Image")
         if st.session_state.uploaded_file is not None:
             # Yükleme sırasında spinner göstermek
@@ -214,6 +228,7 @@ def page_2():
 
                 # İşleme sokulan resmi göster
                 st.image(processed_image, caption="Processed Image", use_column_width=True)
+            # İşlenmiş resmi session_state içinde kontrol et
             
         else:
             st.write("İşlenecek bir resim yükleyin.")
