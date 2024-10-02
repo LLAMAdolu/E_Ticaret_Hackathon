@@ -15,7 +15,6 @@ vision_model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'
 if vision_model_path not in sys.path:
     sys.path.append(vision_model_path)
 from image_processing_pipeline import process_image_pipeline
-
 user_service = UserService()
 
 # Uygulama arka plan stilini belirle
@@ -183,7 +182,6 @@ def page_2():
     """Sayfa 2: Yüklenen resmi işleyip sonuçları gösterir."""
     st.title("Image Processing: Before and After")
     
-    col1, col2 = st.columns(2)
     col1, col2, col3 = st.columns([2,1,2])
 
     # Solda yüklenen dosyanın resmini göster
@@ -207,28 +205,33 @@ def page_2():
                     st.write(f"{i+1} pressed")        
 
     # Sağda işlem sonrası resmi göster
-    with col2:
     with col3:
         st.subheader("Processed Image")
         if st.session_state.uploaded_file is not None:
-            # Yükleme sırasında spinner göstermek
-            with st.spinner("Processing the image..."):
-                # Geçici dosya oluşturma
-                image = Image.open(st.session_state.uploaded_file)
-                with NamedTemporaryFile(delete=False, suffix=".png") as temp_file:
-                    image.save(temp_file.name)
-                    temp_image_path = temp_file.name
-
-                # İşleme sokulmuş resim
-                processed_image = process_image_pipeline(
-                    temp_image_path,
-                    "Replace the background with a scene inspired by the richness of local heritage, incorporating warm, rustic tones like wooden textures or handwoven fabrics. The background should evoke a sense of tradition and authenticity, enhancing the product's connection to its roots without overpowering its appeal."
-                )
-                time.sleep(3)  # İşlem simülasyonu için bekleme süresi
-
-                # İşleme sokulan resmi göster
-                st.image(processed_image, caption="Processed Image", use_column_width=True)
             # İşlenmiş resmi session_state içinde kontrol et
+            if 'processed_image' not in st.session_state:
+                # Yükleme sırasında spinner göstermek
+                with st.spinner("Processing the image..."):
+                    # Geçici dosya oluşturma
+                    image = Image.open(st.session_state.uploaded_file)
+                    with NamedTemporaryFile(delete=False, suffix=".png") as temp_file:
+                        image.save(temp_file.name)
+                        temp_image_path = temp_file.name
+
+                    # İşleme sokulmuş resim
+                    processed_image = process_image_pipeline(
+                        temp_image_path,
+                        "Replace the background with a scene inspired by the richness of local heritage, incorporating warm, rustic tones like wooden textures or handwoven fabrics. The background should evoke a sense of tradition and authenticity, enhancing the product's connection to its roots without overpowering its appeal."
+                    )
+                    time.sleep(3)  # İşlem simülasyonu için bekleme süresi
+
+                    # İşlenmiş resmi session_state'e kaydet
+                    st.session_state.processed_image = processed_image
+            else:
+                processed_image = st.session_state.processed_image
+
+            # İşleme sokulan resmi göster
+            st.image(processed_image, caption="Processed Image", use_column_width=True)
             
         else:
             st.write("İşlenecek bir resim yükleyin.")
@@ -237,7 +240,6 @@ def page_2():
     if st.button("İlerle", key="next_to_3"):
         st.session_state.page = 3
         st.rerun()
-
 
 
 # Sayfa 3: Resim seçimi
