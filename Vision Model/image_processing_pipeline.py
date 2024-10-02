@@ -6,6 +6,7 @@ from diffusers import AutoPipelineForInpainting
 from diffusers.utils import load_image
 import rembg
 import shutil
+import subprocess
 
 # 1) Mask Oluşturma (Only in memory)
 def get_object_mask(image_path):
@@ -34,15 +35,7 @@ def blur_mask(mask):
 
 # 4) Model ile Inpainting (Save final result)
 def apply_inpainting(input_image_path, mask, prompt):
-    # Geçici dosya yolunu belirliyoruz
-    temp_input_image_path = "temp_input_image.png"
-    
-    # BytesIO nesnesini kaydediyoruz
-    with open(temp_input_image_path, 'wb') as f:
-        f.write(input_image_path.getbuffer())
-    
-    # Load image using its file path
-    input_image = load_image(temp_input_image_path)
+    input_image = load_image(input_image_path)
 
     pipeline = AutoPipelineForInpainting.from_pretrained("diffusers/stable-diffusion-xl-1.0-inpainting-0.1", torch_dtype=torch.float16, variant="fp16").to('cuda')
     pipeline.enable_model_cpu_offload()
@@ -51,18 +44,16 @@ def apply_inpainting(input_image_path, mask, prompt):
     
     # Perform inpainting
     output_image = pipeline(prompt=prompt, image=input_image, mask_image=mask, generator=generator).images[0]
-    
-    # Geçici dosyayı temizle
-    os.remove(temp_input_image_path)
 
     return output_image
 
+
 # 5) Upscale İşlemi
 def upscale_image_with_realesrgan(input_image):
-    script_path = 'Real-ESRGAN/inference_realesrgan.py'
+    script_path = 'E_Ticaret_Hackathon/VisionModel/Real-ESRGAN/inference_realesrgan.py'
     input_image.save("temp_input_image.png")
 
-    command = f"python \"{script_path}\" -n RealESRGAN_x4plus -i temp_input_image.png -o . --outscale 3.5"
+    command = f"python ../VisionModel/Real-ESRGAN/inference_realesrgan.py -n RealESRGAN_x4plus -i temp_input_image.png -o . --outscale 3.5"
     result = subprocess.run(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     
     if result.returncode != 0:
@@ -77,6 +68,16 @@ def upscale_image_with_realesrgan(input_image):
     os.remove("temp_input_image.png")
     os.remove(output_image_path)
     return upscaled_image
+
+# 6) Resmi Orijinal Boyuta Yeniden Boyutlandırma
+def resize_image_to_original(image, original_image_path):
+    original_image = Image.open(original_image_path)
+    original_size = original_image.size
+    
+    # Resize the upscaled image to match the original dimensions
+    resized_image = image.resize(original_size)
+    return resized_image
+
 
 # Ana işleyiş fonksiyonu
 def process_image_pipeline(input_image_path, prompt):
