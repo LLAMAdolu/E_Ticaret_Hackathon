@@ -1,13 +1,27 @@
 import streamlit as st
 from PIL import Image, ImageDraw, ImageOps
 import requests
+import io
 from io import BytesIO
 from streamlit_image_select import image_select
+from services import UserService
 
+import sys
+import os
+
+# Add the path to Vision Model folder
+vision_model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../Vision Model'))
+sys.path.append(vision_model_path)
+
+# Now you can import the image processing pipeline
+import image_processing_pipeline as ipp
+
+user_service = UserService()
+
+# Uygulama arka plan stilini belirle
 st.markdown(
     """
     <style>
-    /* Arka plan görseli */
     .stApp {
         background: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), 
                     url("https://www.gidamuhendisleri.org.tr/wp-content/uploads/2021/08/organik_gida_ihracat-1-1110x628.jpg");
@@ -20,111 +34,214 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# Oturum durumları için varsayılan değerleri ayarla
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
-
+    
+if 'page' not in st.session_state:
+    st.session_state.page = 'login'    
+    
+if 'processed_image' not in st.session_state:
+    st.session_state.processed_image = None
+    
 if 'navigation_initialized' not in st.session_state:
     st.session_state['navigation_initialized'] = False
 
 if 'users' not in st.session_state:
     st.session_state['users'] = {}  # Basit bir kullanıcı veritabanı
 
-# Yardımcı bir fonksiyon ile URL'den resmi indir ve PIL Image nesnesine dönüştür
+# Yardımcı fonksiyonlar
 def load_image_from_url(url):
+    """URL'den resim indirip PIL Image nesnesine dönüştürür."""
     response = requests.get(url)
     img = Image.open(BytesIO(response.content))
     return img
 
 def add_rounded_corners(image, radius):
-    # Görselin boyutlarını al
+    """Görselin köşelerini yuvarlar."""
     mask = Image.new('L', image.size, 0)
     draw = ImageDraw.Draw(mask)
-    
-    # Oval kenarlar için dairesel köşeler çiz
     draw.rounded_rectangle((0, 0) + image.size, radius=radius, fill=255)
-    
-    # Görsele maskeyi uygula
     output = ImageOps.fit(image, mask.size, centering=(0.5, 0.5))
     output.putalpha(mask)
-    
     return output
 
-
+# Görsellerin varsayılanı
 raw_output_image = load_image_from_url("https://platincdn.com/3094/pictures/DPOFTDYUOC818202119498_YQSMKACAXY91220209418_ev-yapimi-domates-salcasi-an.jpg")
-uploaded_file = None
 
-
-# Login fonksiyonu
+# Giriş fonksiyonu
 def login():
+    """Kullanıcı giriş ekranı."""
     st.title("Login Ekranı")
 
-    # Kullanıcı adı ve şifre giriş kutuları
+    # Kullanıcı adı ve şifre giriş alanları
     username = st.text_input("Kullanıcı Adı")
     password = st.text_input("Şifre", type="password")
+    
+    # İki sütun (Giriş ve Kayıt ol butonları için)
     col1, col2 = st.columns(2)
+    
+    # CSS ile sağ kolonu hizala
     st.markdown(
         """
         <style>
-            div[data-testid="column"]:nth-of-type(2)
-            {
-                text-align: end;
-            } 
+            div[data-testid="column"]:nth-of-type(2) { text-align: end; } 
         </style>
-        """,unsafe_allow_html=True
+        """, unsafe_allow_html=True
     )
+
+    # Giriş butonu (Sol kolon)
     with col1:
         if st.button("Giriş"):
-            # Basit bir doğrulama, kayıtlı kullanıcılar için kontrol (st.session_state['users'])
-            if username in st.session_state['users'] and st.session_state['users'][username] == password:
-                st.session_state['logged_in'] = True
-                st.success("Başarıyla giriş yaptınız!")
-                st.session_state.page = 1
+            # Kullanıcı doğrulama işlemi
+            if user_service.check_login(username, password):
+                st.success(f"Başarıyla giriş yaptınız!")
+                st.session_state.page = 1  # Başarıyla giriş yapıldıysa ana sayfaya yönlendir
+                st.rerun()
             else:
                 st.error("Kullanıcı adı veya şifre yanlış")
+            
+    # Kayıt ol butonu (Sağ kolon)
     with col2:
         if st.button("Kayıt Ol"):
             st.session_state.page = 'register'  # Kayıt sayfasına yönlendir
+            st.rerun()
 
-# Kayıt ol fonksiyonu
 def register():
     st.title("Kayıt Ol")
 
-    # Kullanıcı adı ve şifre giriş kutuları
+    # Kullanıcı adı, şifre ve şehir bilgisi giriş kutuları
     new_username = st.text_input("Yeni Kullanıcı Adı")
     new_password = st.text_input("Yeni Şifre", type="password")
     confirm_password = st.text_input("Şifreyi Onaylayın", type="password")
+
+    # Türkiye'deki 81 ili dropdown menüde göstermek için selectbox kullanıyoruz
+    cities = [
+        "Adana", "Adıyaman", "Afyonkarahisar", "Ağrı", "Aksaray", "Amasya", "Ankara", "Antalya", "Ardahan", 
+        "Artvin", "Aydın", "Balıkesir", "Bartın", "Batman", "Bayburt", "Bilecik", "Bingöl", "Bitlis", "Bolu", 
+        "Burdur", "Bursa", "Çanakkale", "Çankırı", "Çorum", "Denizli", "Diyarbakır", "Düzce", "Edirne", "Elazığ", 
+        "Erzincan", "Erzurum", "Eskişehir", "Gaziantep", "Giresun", "Gümüşhane", "Hakkari", "Hatay", "Iğdır", 
+        "Isparta", "İstanbul", "İzmir", "Kahramanmaraş", "Karabük", "Karaman", "Kars", "Kastamonu", "Kayseri", 
+        "Kırıkkale", "Kırklareli", "Kırşehir", "Kilis", "Kocaeli", "Konya", "Kütahya", "Malatya", "Manisa", 
+        "Mardin", "Mersin", "Muğla", "Muş", "Nevşehir", "Niğde", "Ordu", "Osmaniye", "Rize", "Sakarya", 
+        "Samsun", "Siirt", "Sinop", "Sivas", "Şanlıurfa", "Şırnak", "Tekirdağ", "Tokat", "Trabzon", "Tunceli", 
+        "Uşak", "Van", "Yalova", "Yozgat", "Zonguldak"
+    ]
+
+    city = st.selectbox("Şehir", cities)  # Dropdown ile şehir seçimi
+
     col1, col2 = st.columns(2)
     st.markdown(
         """
         <style>
-            div[data-testid="column"]:nth-of-type(2)
-            {
-                text-align: end;
-            } 
+            div[data-testid="column"]:nth-of-type(2) { text-align: end; } 
         </style>
-        """,unsafe_allow_html=True
+        """, unsafe_allow_html=True
     )
+
     with col2:
         if st.button("Kayıt Ol"):
-            if new_username in st.session_state['users']:
+            if user_service.username_exists(new_username):
                 st.error("Bu kullanıcı adı zaten mevcut. Lütfen başka bir kullanıcı adı seçin.")
             elif new_password != confirm_password:
                 st.error("Şifreler eşleşmiyor.")
             elif not new_username or not new_password:
                 st.error("Kullanıcı adı ve şifre boş bırakılamaz.")
             else:
-                # Yeni kullanıcıyı kaydet
-                st.session_state['users'][new_username] = new_password
-                st.success("Kayıt başarılı! Lütfen giriş yapın.")
+                # Yeni kullanıcıyı kaydet, kullanıcı adı ve şifre ile birlikte şehir bilgisi de saklanıyor
+                user_service.register_user(new_username, new_username, new_username, new_password, city)
+                st.success(f"Kayıt başarılı! {city} şehrindensiniz. Lütfen giriş yapın.")
                 st.session_state.page = 'login'  # Kayıt olduktan sonra giriş sayfasına yönlendir
+                st.rerun()
     with col1:
         if st.button("Geri Dön"):
             st.session_state.page = 'login'  # Geri dön düğmesi ile login sayfasına dön
+            st.rerun()
 
+
+# Sayfa 1: Resim yükleme ve metin girişi
+def page_1():
+    """Sayfa 1: Resim yükleme ve metin girişi."""
+    st.title("Page 1: Upload Image and Input Text")
+
+    if "uploaded_file" not in st.session_state:
+        st.session_state.uploaded_file = None
+
+    uploaded_file = st.file_uploader("Upload an image", type=["png", "jpg", "jpeg"])
+    
+    if uploaded_file is not None:
+        st.session_state.uploaded_file = uploaded_file
+
+    text_input = st.text_input("Enter your text here")
+
+    if st.button("İlerle"):
+        if st.session_state.uploaded_file is None:
+            st.write("Lütfen ürününüzün resim dosyasını yükleyin.")
+        elif not text_input.strip():
+            st.write("Lütfen ürününüz için bir açıklama yazın.")
+        else:
+            # Resmi kaydet
+            image_bytes = st.session_state.uploaded_file.read()
+            image = Image.open(BytesIO(image_bytes))
+            input_image_path = f"temp_uploaded_image_{st.session_state.uploaded_file.name}"
+            image.save(input_image_path)
+
+            # Resim işlemesi sırasında loading spinner göster
+            with st.spinner('Resim işleniyor... Lütfen bekleyin.'):
+                # Image processing pipeline'ını çalıştır ve sonuç resmini al
+                prompt = "Replace the background with a soft, neutral-colored surface."
+                processed_image = process_image_pipeline(input_image_path, prompt)
+
+                # İşlenen resmi kaydet
+                processed_image_path = f"processed_{st.session_state.uploaded_file.name}"
+                processed_image.save(processed_image_path)
+
+            # İşlenen resmi session_state'e kaydet
+            st.session_state.processed_image_path = processed_image_path
+            st.session_state.page = 2
+                
+                
+# Sayfa 2: Resim, kaydırma çubukları ve butonlar
+def page_2():
+    """Sayfa 2: İşlenmiş ve orijinal resimleri göster."""
+    st.title("Page 2: Resim Karşılaştırması")
+
+    if st.session_state.uploaded_file is None:
+        st.write("Lütfen geri dönüp bir resim yükleyin.")
+        return
+
+    col1, col2 = st.columns(2)
+
+    # Orijinal resim
+    with col1:
+        st.image(st.session_state.uploaded_file, caption="Orijinal Resim", use_column_width=True)
+
+    # İşlenen resim
+    with col2:
+        if 'processed_image_path' in st.session_state:
+            processed_image_path = st.session_state.processed_image_path
+            st.image(processed_image_path, caption="İşlenmiş Resim", use_column_width=True)
+        else:
+            st.write("Resim işleme tamamlanmadı.")
+
+    if st.button("Geri Dön"):
+        st.session_state.page = 1
+        
+        
+    # Sağdaki resmi göster
+    with col3:
+        st.image(raw_output_image, caption="Right Image", use_column_width=True)
+
+    if st.button("İlerle", key="next_to_3"):
+        st.session_state.page = 3
+        st.rerun()
+
+
+# Sayfa 3: Resim seçimi
 def page_3():
+    """Sayfa 3: Resim seçimi."""
     st.title("Page 3: Select Image")
     
-    # Resimleri içeren array st.session_state içinde yoksa yükle
     if "images_array" not in st.session_state or st.session_state.images_array is None:
         image_urls = [
             "https://static.ticimax.cloud/cdn-cgi/image/width=540,quality=85/30523/uploads/urunresimleri/buyuk/biber-salcasi-1-kg-5-fed8.jpg",
@@ -136,50 +253,43 @@ def page_3():
         ]
 
         image_paths = [
-            
-            r"C:\Users\batur\Downloads\Streamlit\Streamlit\Images\salca1.jpg",
-            r"C:\Users\batur\Downloads\Streamlit\Streamlit\Images\salca2.png",
-            r"C:\Users\batur\Downloads\Streamlit\Streamlit\Images\salca3.jpg",
-            r"C:\Users\batur\Downloads\Streamlit\Streamlit\Images\salca4.jpg",
-            r"C:\Users\batur\Downloads\Streamlit\Streamlit\Images\salca5.jpg",
-            r"C:\Users\batur\Downloads\Streamlit\Streamlit\Images\salca6.jpg"
-            
+            "../Images/salca1.jpg",
+            "../Images/salca2.png",
+            "../Images/salca3.jpg",
+            "../Images/salca4.jpg",
+            "../Images/salca5.jpg",
+            "../Images/salca6.jpg"
         ]
 
-        # URL'lerden resimleri indir ve st.session_state içine kaydet
-        #st.session_state.images_array = [load_image_from_url(url) for url in image_urls]
         st.session_state.images_array = [Image.open(path) for path in image_paths]
 
-    # İlk elemanı varsayılan olarak seçilen resim yap
     if "selected_image" not in st.session_state:
-        st.session_state.selected_image = st.session_state.images_array[0]  # İlk resim varsayılan seçili resim olacak
+        st.session_state.selected_image = st.session_state.images_array[0]
     
     if "images_array" in st.session_state and st.session_state.images_array:
         st.session_state.images_array[0] = raw_output_image
         st.session_state.selected_image = raw_output_image
-    # Streamlit'de iki sütun oluştur
+
     col1, col2 = st.columns([3, 1])
     
-    selected_image = None
-    # Sol tarafta büyük resmi göster (300x300 boyutunda)
-    # Tüm küçük resimlerden bir seçim yapılmasını sağla
     with col2:
-        
         selected_image_ = image_select(
             label="",
-            images=st.session_state.images_array,  # images_array'deki tüm resimleri göster
+            images=st.session_state.images_array,
             use_container_width=True
         )
         if selected_image_:
             st.session_state.selected_image = selected_image_
+    
     with col1:
-        selected_image = st.image(add_rounded_corners(st.session_state.selected_image.convert("RGB"),30), caption="Selected Image", width=300)
+        st.image(add_rounded_corners(st.session_state.selected_image.convert("RGB"), 30), caption="Selected Image", width=300)
 
-    # Sonraki sayfaya geçmek için bir düğme
     if st.button("İlerle", key="next_to_4"):
         st.session_state.page = 4
+        st.rerun()
 
-# Sayfa 4 içeriği (Son sayfa)
+
+# Sayfa 4: Son sayfa
 def page_4():
     st.title("Page 4: Final Page")
     
@@ -201,7 +311,7 @@ def page_4():
             st.write("You have confirmed the information.")
             # Daha fazla mantık eklenebilir (örneğin, kaydetme veya gönderme işlemleri)
 
-# Güncellenmiş navigation fonksiyonu
+# Sayfa yönlendirme
 def navigation():
     col1_, col2_, col3 = st.columns([1,2,1])
 
@@ -268,98 +378,27 @@ def navigation():
             """,
             unsafe_allow_html=True
     )
-
-# Sayfa 1 içeriği
-def page_1():
-
-    st.title("Page 1: Upload Image and Input Text")
-
-    if "uploaded_file" not in st.session_state:
-        st.session_state.uploaded_file = None
-    
-    # Resim yükleme
-    uploaded_file = st.file_uploader("Upload an image", type=["png", "jpg", "jpeg"])
-    if uploaded_file is not None:
-        st.session_state.uploaded_file = uploaded_file
-    
-    text_input = st.text_input("Enter your text here")
-    
-    if st.button("İlerle"):
-        if st.session_state.uploaded_file is None:
-            st.write("Lütfen ürününüzün resim dosyasını yükleyin.")
-        elif text_input == None or text_input == "" or text_input == " ":
-            st.write("Lütfen ürününüz için bir açıklama yazın.")
-        else:
-            st.session_state.page = 2
-
-
-# Sayfa 2 içeriği
-def page_2():
-    st.title("Page 2: Image, Sliders, and Buttons")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    # Yüklenen dosyanın resmini göster
-    with col1:
-        if st.session_state.uploaded_file is not None:
-            st.image(st.session_state.uploaded_file, caption="Left Image", use_column_width=True)
-        else:
-            st.write("Lütfen bir resim yükleyin.")
-
-    with col2:
-        slider1 = st.slider("Slider 1", 0, 100, 50)
-        slider2 = st.slider("Slider 2", 0, 100, 50)
-        slider3 = st.slider("Slider 3", 0, 100, 50)
-        button_cols = st.columns(4)
         
-        with button_cols[0]:
-            if st.button("Button 1"):
-                st.write("Button 1 pressed")
-        with button_cols[1]:
-            if st.button("Button 2"):
-                st.write("Button 2 pressed")
-        with button_cols[2]:
-            if st.button("Button 3"):
-                st.write("Button 3 pressed")
-        with button_cols[3]:
-            if st.button("Button 4"):
-                st.write("Button 4 pressed")
-
-    # images_array kontrol et ve dolu olup olmadığını doğrula
-    if "images_array" in st.session_state and st.session_state.images_array:
-        st.session_state.images_array[0] = raw_output_image
-        st.session_state.selected_image = raw_output_image
-    
-    with col3:
-        st.image(raw_output_image, caption="Right Image", use_column_width=True)
-    
-    if st.button("İlerle", key="next_to_3"):
-        st.session_state.page = 3
-
-# Sayfa durumu kontrolü
+        
+# Sayfa durum kontrolü
 if "page" not in st.session_state:
     st.session_state.page = 'login'
 
-# Navigation fonksiyonunu sadece bir kez çalıştırmak için kontrol ediyoruz
-
-
+# Sayfa içeriklerini göster
 if st.session_state.page == 'login':
     login()
 elif st.session_state.page == 'register':
     register()
 else:
-    if not st.session_state['navigation_initialized']:
-        navigation()  # Navigation'ı oluştur
-        st.session_state['navigation_initialized'] = True  # Navigation'ın oluşturulduğunu işaretle
-
-
-    # Mevcut sayfa durumuna göre sayfa içeriğini göster
     if st.session_state.page == 1:
+        navigation()    
         page_1()
     elif st.session_state.page == 2:
+        navigation()
         page_2()
     elif st.session_state.page == 3:
+        navigation()
         page_3()
     elif st.session_state.page == 4:
+        navigation()
         page_4()
-
