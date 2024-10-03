@@ -5,7 +5,7 @@ from io import BytesIO
 from tempfile import NamedTemporaryFile
 from streamlit_image_select import image_select
 from services import UserService
-import time  # Bu satırı ekledik
+import time 
 import sys
 import os
 import products
@@ -16,8 +16,10 @@ vision_model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'
 # Bu yolu Python arama yoluna ekliyoruz
 if vision_model_path not in sys.path:
     sys.path.append(vision_model_path)
+    
 from image_processing_pipeline import process_image_pipeline
 user_service = UserService()
+
 
 # Uygulama arka plan stilini belirle
 st.markdown(
@@ -34,6 +36,28 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
+FASTAPI_URL = "http://localhost:8000/process-image/"
+
+def call_inpainting_service(image_path, prompt):
+    with open(image_path, "rb") as img_file:
+        files = {'input_image': img_file}
+        data = {'prompt': prompt}
+
+        # Make the POST request to the FastAPI service
+        response = requests.post(FASTAPI_URL, files=files, data=data)
+
+        # Hata mesajı ve yanıt kontrolü
+        if response.status_code != 200:
+            raise Exception(f"Error: {response.status_code} - {response.text}")
+        
+        try:
+            # Yanıtın doğrudan ham verisini okuma
+            image = Image.open(BytesIO(response.content))
+            return image
+        except Exception as e:
+            raise Exception(f"Error opening the processed image: {e}")
+
 
 # Oturum durumları için varsayılan değerleri ayarla
 if 'logged_in' not in st.session_state:
@@ -73,17 +97,14 @@ def login():
     username = st.text_input("Kullanıcı Adı")
     password = st.text_input("Şifre", type="password")
     
+    # Bootstrap CSS link
+    st.markdown("""
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-1BmE4kWBq78iYhFldvKuhfTAU6auU3c9a7BfG1Jp1W1Euj4l4qZ5V6Af3e25kIt" crossorigin="anonymous">
+    """, unsafe_allow_html=True)
+    
+    
     # İki sütun (Giriş ve Kayıt ol butonları için)
     col1, col2 = st.columns(2)
-    
-    # CSS ile sağ kolonu hizala
-    st.markdown(
-        """
-        <style>
-            div[data-testid="column"]:nth-of-type(2) { text-align: end; } 
-        </style>
-        """, unsafe_allow_html=True
-    )
 
     # Giriş butonu (Sol kolon)
     with col1:
@@ -107,6 +128,12 @@ def login():
 
 def register():
     st.title("Kayıt Ol")
+    
+    # Bootstrap CSS link
+    st.markdown("""
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-1BmE4kWBq78iYhFldvKuhfTAU6auU3c9a7BfG1Jp1W1Euj4l4qZ5V6Af3e25kIt" crossorigin="anonymous">
+    """, unsafe_allow_html=True)
+
 
     # Kullanıcı adı, şifre ve şehir bilgisi giriş kutuları
     new_username = st.text_input("Yeni Kullanıcı Adı")
@@ -129,13 +156,7 @@ def register():
     city = st.selectbox("Şehir", cities)  # Dropdown ile şehir seçimi
 
     col1, col2 = st.columns(2)
-    st.markdown(
-        """
-        <style>
-            div[data-testid="column"]:nth-of-type(2) { text-align: end; } 
-        </style>
-        """, unsafe_allow_html=True
-    )
+
 
     with col2:
         if st.button("Kayıt Ol"):
@@ -178,6 +199,7 @@ def page_1():
         elif not text_input.strip():
             st.write("Lütfen ürününüz için bir açıklama yazın.")
         else:
+            st.session_state["user_input"] = text_input
             st.session_state.page = 2
             st.rerun()
 
@@ -213,49 +235,50 @@ def page_2():
     with col3:
         st.subheader("Processed Image")
         if st.session_state.uploaded_file is not None:
-            # İşlenmiş resmi session_state içinde kontrol et
+            # Check if processed_image is already in session state
             if 'processed_image' not in st.session_state:
-                # Yükleme sırasında spinner göstermek
                 with st.spinner("Processing the image..."):
-                    # Geçici dosya oluşturma
-                    image = Image.open(st.session_state.uploaded_file)
-                    with NamedTemporaryFile(delete=False, suffix=".png") as temp_file:
-                        image.save(temp_file.name)
-                        temp_image_path = temp_file.name
+                    try:
+                        image = Image.open(st.session_state.uploaded_file)
+                        with NamedTemporaryFile(delete=False, suffix=".png") as temp_file:
+                            image.save(temp_file.name)
+                            temp_image_path = temp_file.name
 
-                    # İşleme sokulmuş resim
-                    processed_image = process_image_pipeline(
-                        temp_image_path,
-                        "Replace the background with a scene inspired by the richness of local heritage, incorporating warm, rustic tones like wooden textures or handwoven fabrics. The background should evoke a sense of tradition and authenticity, enhancing the product's connection to its roots without overpowering its appeal."
-                    )
-                    
-                    # Klasör oluştur ve dosya kaydet
-                    user_id = st.session_state['user_id']  # Replace this with the actual user ID
-                    folder_path = f"imgs/user_{user_id}"
-                    
-                    if not os.path.exists(folder_path):
-                        os.makedirs(folder_path)
-                
-                    # Mevcut dosyaları kontrol et ve uygun index bul
-                    existing_files = [f for f in os.listdir(folder_path) if f.endswith("_generated.png")]
-                    index = len(existing_files) + 1  # İndeksi mevcut dosyalara göre bul
-                
-                    new_filename = f"{index}_generated.png"
-                    
-                    # Dosya yolunu oluştur ve kaydet
-                    save_path = os.path.join(folder_path, new_filename)
-                    processed_image.save(save_path)
-    
-                    time.sleep(0.1)  # İşlem simülasyonu için bekleme süresi
+                        # Call the FastAPI service for processing the image
+                        processed_image = call_inpainting_service(
+                            temp_image_path,
+                            "Replace the background with a scene inspired by the richness of local heritage..."
+                        )
 
-                    # İşlenmiş resmi session_state'e kaydet
-                    st.session_state.processed_image = processed_image
+                        # Klasör oluştur ve dosya kaydet
+                        user_id = st.session_state['user_id']  # Replace this with the actual user ID
+                        folder_path = f"imgs/user_{user_id}"
+
+                        if not os.path.exists(folder_path):
+                            os.makedirs(folder_path)
+
+                        # Mevcut dosyaları kontrol et ve uygun index bul
+                        existing_files = [f for f in os.listdir(folder_path) if f.endswith("_generated.png")]
+                        index = len(existing_files) + 1  # İndeksi mevcut dosyalara göre bul
+
+                        new_filename = f"{index}_generated.png"
+
+                        # Dosya yolunu oluştur ve kaydet
+                        save_path = os.path.join(folder_path, new_filename)
+                        processed_image.save(save_path)
+                        
+                        # İşlenen resmi session_state'e kaydet
+                        st.session_state.processed_image = processed_image
+
+                    except Exception as e:
+                        st.error(f"Error processing image: {e}")
+                        st.session_state.processed_image = None
+
+            # Display the processed image if it exists
+            if st.session_state.processed_image:
+                st.image(st.session_state.processed_image, caption="Processed Image", use_column_width=True)
             else:
-                processed_image = st.session_state.processed_image
-
-            # İşleme sokulan resmi göster
-            st.image(processed_image, caption="Processed Image", use_column_width=True)
-            
+                st.write("Resim işlenemedi. Lütfen tekrar deneyin.")
         else:
             st.write("İşlenecek bir resim yükleyin.")
 
@@ -263,6 +286,7 @@ def page_2():
     if st.button("İlerle", key="next_to_3"):
         st.session_state.page = 3
         st.rerun()
+
 
 
 # Sayfa 3: Resim seçimi
@@ -329,8 +353,27 @@ def page_4():
     
     # Sağ tarafta text alanı göster
     with col2:
+        with st.spinner("Processing the text..."):
+            url = "http://127.0.0.1:8000/ask-model/"
+
+            # Define the payload (message input)
+            payload = {
+                "message": st.session_state["user_input"]
+            }
+            
+            print(f"upload {payload}")
+            # Send the POST request with the JSON payload
+            response = requests.post(url, json=payload)
+
+            # Check the response status code and output the response
+            generated_text = ""
+            if response.status_code == 200:
+                generated_text = response.json()["response"]
+            else:
+                generated_text = f"Error: {response.status_code}, {response.text}"
+            
         st.subheader("Önerilen Ürün Adı ")
-        st.write("Yemeğin salçalısı (Organik)")
+        st.write(generated_text)
         st.subheader("Önerilen Ürün Açıklaması")
         st.write("Mükemmel yüzde yüz organik salça. Satışını artıracak kelimelerin kullanıldığı ürün bilgisi.")
         

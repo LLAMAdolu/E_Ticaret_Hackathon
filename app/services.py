@@ -10,6 +10,9 @@ import shutil
 import subprocess
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
+from unsloth import FastLanguageModel
+import json
+import difflib
 import io
 
 class VisionModel:
@@ -48,10 +51,10 @@ class VisionModel:
     def blur_mask(self, mask):
         mask_image = Image.fromarray(mask).convert('L')  # Convert to grayscale
     
-        blurred_mask = self.stablediff_pipeline.mask_processor.blur(mask_image, blur_factor=20)
+        blurred_mask = self.vision_pipline.mask_processor.blur(mask_image, blur_factor=20)
         return blurred_mask
     
-    # 5) Upscale İşlemi
+# 5) Upscale İşlemi
     def upscale_image_with_realesrgan(self, input_image):
         script_path = 'E_Ticaret_Hackathon/VisionModel/Real-ESRGAN/inference_realesrgan.py'
         input_image.save("temp_input_image.png")
@@ -74,7 +77,7 @@ class VisionModel:
 
     def apply_inpainting(self, input_image_path, mask, prompt):
         input_image = load_image(input_image_path)
-        output_image = self.pipeline(prompt=prompt, image=input_image, mask_image=mask, generator=self.generator).images[0]
+        output_image = self.vision_pipline(prompt=prompt, image=input_image, mask_image=mask, generator=self.vision_generator).images[0]
 
         return output_image
     
@@ -90,17 +93,98 @@ class VisionModel:
 
     # Ana işleyiş fonksiyonu
     def process_image_pipeline(self, input_image_path, prompt):
-        mask = get_object_mask(input_image_path)
-        inverted_mask = invert_mask(mask)
-        blurred_mask = blur_mask(inverted_mask)
+        mask = self.get_object_mask(input_image_path)
+        inverted_mask = self.invert_mask(mask)
+        blurred_mask = self.blur_mask(inverted_mask)
 
-        inpainted_image = apply_inpainting(input_image_path, blurred_mask, prompt)
-        upscaled_image = upscale_image_with_realesrgan(inpainted_image)
-        resized_image = resize_image_to_original(upscaled_image, input_image_path)
+        inpainted_image = self.apply_inpainting(input_image_path, blurred_mask, prompt)
+        upscaled_image = self.upscale_image_with_realesrgan(inpainted_image)
+        resized_image = self.resize_image_to_original(upscaled_image, input_image_path)
     
         return resized_image
     
 
+class ChatLLAMAdolu:
+    def __init__(self):
+        self.max_seq_length = 2048 # Choose any! We auto support RoPE Scaling internally!
+        self.dtype = None # None for auto detection. Float16 for Tesla T4, V100, Bfloat16 for Ampere+
+        self.load_in_4bit = False # Use 4bit quantization to reduce memory usage. Can be False.
+        self.init_model()
+        self.load_regional_dictionary() 
+    
+    def init_model(self):
+        self.model, self.tokenizer = FastLanguageModel.from_pretrained(
+            model_name = "../TextModel/lora_model", # YOUR MODEL YOU USED FOR TRAINING
+            max_seq_length = self.max_seq_length,
+            dtype = self.dtype,
+            load_in_4bit = self.load_in_4bit,
+        )
+        FastLanguageModel.for_inference(self.model) # Enable native 2x faster inference
+        
+    def load_regional_dictionary(self):
+        # Burada sözlüğü json dosyasından yüklüyoruz.
+        try:
+            with open('../TextModel/dataset/dictionary.json', 'r', encoding='utf-8') as file:
+                self.regional_words = json.load(file)
+        except FileNotFoundError:
+            print("dictionary.json dosyası bulunamadı!")
+            self.regional_words = []    
+        
+    def ask_model(self, message):
+        messages = self.message_formatter(message)
+        inputs = self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=True,
+            add_generation_prompt=True, # Must add for generation
+            return_tensors="pt",
+        ).to("cuda")
+        
+        outputs = self.model.generate(input_ids=inputs, max_new_tokens=256, use_cache=True, temperature=0.1, min_p=0.5)
+        generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        return generated_text
+    
+    def message_formatter(self, message):
+        regional_words = self.find_regional_words(message)
+        content = f"Kullanıcı inputu: \"{message}\" Yöresel kelimeler: {regional_words}"
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a marketing bot that is specialized to make natural language product titles professional, eye-catching and sales-ready. Make user-entered sales descriptions professional. Also, if the user input contains regional words, you can find the meaning of this in the text below. When translating your descriptions into a global and professional form, take these words and their descriptions into account. In response: Use the template \"\"\"\n\"Profesyonel Başlık\": ...\n\"Profesyonel Açıklama\": ...\n\"\"\". If the user enters long and unprofessional additional descriptions, do not display them in the \"Profesyonel Başlık\" section, but add them to the \"Profesyonel Açıklama\" section."
+            },
+            {
+                "role": "user",
+                "content": content
+            },
+        ]
+        return messages  # Fix: Return messages for further processing
+        
+    def find_regional_words(self, message):
+        found_word = None
+        best_similarity = 0
+    
+        words_in_message = message.split()  # Mesajdaki kelimeleri böl
+    
+        # Her bir sözlük kaydını tara
+        for entry in self.regional_words:
+            regional_word = entry["Kelime"].lower()  # Küçük harfe çevir
+            for message_word in words_in_message:
+                message_word_lower = message_word.lower()  # Mesajdaki kelimeyi küçük harfe çevir
+            
+                # Benzerlik oranını hesapla
+                similarity = difflib.SequenceMatcher(None, regional_word, message_word_lower).ratio()
+            
+                # Eğer benzerlik oranı en yüksek ise, onu al
+                if similarity > best_similarity:
+                    best_similarity = similarity
+                    found_word = entry
+
+        # Eğer bir eşleşme bulduysak, en iyi sonucu döndür
+        if found_word and best_similarity > 0.6:  # Eşik değeri %60
+            return found_word
+        else:
+            return {}  # Eşleşme yoksa boş dictionary döndür
+
+    
 class UserService:
     def __init__(self):
         self.user_repo = UserRepository()
@@ -178,26 +262,46 @@ class ProductService:
 
 app = FastAPI()
 vision_model = VisionModel()
+chat = ChatLLAMAdolu()
+
+import logging
+from PIL import UnidentifiedImageError
 
 @app.post("/process-image/")
 async def process_image(input_image: UploadFile = File(...), prompt: str = Form(...)):
-    # Save the uploaded image temporarily
-    input_image_data = await input_image.read()
-    input_image = Image.open(io.BytesIO(input_image_data))
+    logging.info("Image upload process started.")
+    try:
+        # Save the uploaded image temporarily
+        input_image_data = await input_image.read()
+        input_image = Image.open(io.BytesIO(input_image_data))
+        temp_image_path = os.path.join("/tmp", "temp_input_image.png")
+        
+        logging.info(f"Saving image to {temp_image_path}")
+        input_image.save(temp_image_path)
+        
+        if not os.path.exists(temp_image_path):
+            raise FileNotFoundError(f"Geçici dosya bulunamadı: {temp_image_path}")
+        
+        logging.info(f"Processing image at {temp_image_path}")
+        processed_image = vision_model.process_image_pipeline(temp_image_path, prompt)
 
-    # Save the image to a temporary path for processing
-    temp_image_path = "temp_input_image.png"
-    input_image.save(temp_image_path)
+        # İşlenen görüntünün geçerli olup olmadığını kontrol et
+        if processed_image is None:
+            raise ValueError("Processed image is None.")
+        
+        try:
+            # İşlenmiş görüntüyü kaydetmeye çalış
+            output_image_bytes = io.BytesIO()
+            processed_image.save(output_image_bytes, format='PNG')
+            output_image_bytes.seek(0)
+        except UnidentifiedImageError as e:
+            raise ValueError(f"Processed image cannot be identified as a valid image: {e}")
+        
+        logging.info("Image processing completed successfully.")
 
-    # Call the process_image_pipeline method with the temporary image path
-    processed_image = vision_model.process_image_pipeline(temp_image_path, prompt)
+        return StreamingResponse(output_image_bytes, media_type="image/png")
 
-    # Convert the processed image to bytes for the response
-    output_image_bytes = io.BytesIO()
-    processed_image.save(output_image_bytes, format='PNG')
-    output_image_bytes.seek(0)
+    except Exception as e:
+        logging.error(f"Error occurred: {str(e)}")
+        return {"error": str(e)}
 
-    # Remove the temporary image file
-    # os.remove(temp_image_path)  # Uncomment if you want to delete the temporary file after processing
-
-    return StreamingResponse(output_image_bytes, media_type="image/png")
