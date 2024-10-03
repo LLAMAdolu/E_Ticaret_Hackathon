@@ -37,6 +37,16 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+if 'product_list' not in st.session_state:
+    st.session_state['product_list'] = [
+    {"name": "Ürün 1", "image": Image.open("Images/salca6.jpg"), "description": "Ürün 1 hakkında detaylı bilgi."},
+    {"name": "Ürün 2", "image": Image.open("Images/salca6.jpg"), "description": "Ürün 2 hakkında detaylı bilgi."},
+    {"name": "Ürün 3", "image": Image.open("Images/salca6.jpg"), "description": "Ürün 3 hakkında detaylı bilgi."},
+    {"name": "Ürün 4", "image": Image.open("Images/salca6.jpg"), "description": "Ürün 4 hakkında detaylı bilgi."},
+    {"name": "Ürün 5", "image": Image.open("Images/salca6.jpg"), "description": "Ürün 5 hakkında detaylı bilgi."},
+    {"name": "Ürün 6", "image": Image.open("Images/salca6.jpg"), "description": "Ürün 6 hakkında detaylı bilgi."},
+]
+
 FASTAPI_URL = "http://localhost:8000/process-image/"
 
 def call_inpainting_service(image_path, prompt):
@@ -58,10 +68,12 @@ def call_inpainting_service(image_path, prompt):
         except Exception as e:
             raise Exception(f"Error opening the processed image: {e}")
 
-
 # Oturum durumları için varsayılan değerleri ayarla
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
+    
+if 'page' not in st.session_state:
+    st.session_state.page = "login"
 
 if 'navigation_initialized' not in st.session_state:
     st.session_state['navigation_initialized'] = False
@@ -91,7 +103,7 @@ raw_output_image = load_image_from_url("https://platincdn.com/3094/pictures/DPOF
 # Giriş fonksiyonu
 def login():
     """Kullanıcı giriş ekranı."""
-    st.title("Login Ekranı")
+    st.title("Giriş Yap")
 
     # Kullanıcı adı ve şifre giriş alanları
     username = st.text_input("Kullanıcı Adı")
@@ -99,7 +111,7 @@ def login():
     
     # Bootstrap CSS link
     st.markdown("""
-        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-1BmE4kWBq78iYhFldvKuhfTAU6auU3c9a7BfG1Jp1W1Euj4l4qZ5V6Af3e25kIt" crossorigin="anonymous">
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     """, unsafe_allow_html=True)
     
     
@@ -131,7 +143,7 @@ def register():
     
     # Bootstrap CSS link
     st.markdown("""
-        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-1BmE4kWBq78iYhFldvKuhfTAU6auU3c9a7BfG1Jp1W1Euj4l4qZ5V6Af3e25kIt" crossorigin="anonymous">
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     """, unsafe_allow_html=True)
 
 
@@ -181,17 +193,17 @@ def register():
 # Sayfa 1: Resim yükleme ve metin girişi
 def page_1():
     """Sayfa 1: Resim yükleme ve metin girişi."""
-    st.title("Page 1: Upload Image and Input Text")
+    st.title("Adım 1: Resim Yükleme ve Açıklama Girme")
 
     if "uploaded_file" not in st.session_state:
         st.session_state.uploaded_file = None
 
-    uploaded_file = st.file_uploader("Upload an image", type=["png", "jpg", "jpeg"])
+    uploaded_file = st.file_uploader("Resim Yükleyin", type=["png", "jpg", "jpeg"])
     
     if uploaded_file is not None:
         st.session_state.uploaded_file = uploaded_file
 
-    text_input = st.text_input("Enter your text here")
+    text_input = st.text_input("Açıklamanızı Girin")
 
     if st.button("İlerle"):
         if st.session_state.uploaded_file is None:
@@ -207,15 +219,15 @@ def page_1():
 # Sayfa 2: Yükleme işlemi ve görsel işleme.
 def page_2():
     """Sayfa 2: Yüklenen resmi işleyip sonuçları gösterir."""
-    st.title("Image Processing: Before and After")
+    st.title("Görüntü İyileştirme: Öncesi ve Sonrası")
     
     col1, col2, col3 = st.columns([2,1,2])
 
     # Solda yüklenen dosyanın resmini göster
     with col1:
-        st.subheader("Uploaded Image")
+        st.subheader("Yüklenen Fotoğraf")
         if st.session_state.uploaded_file is not None:
-            st.image(st.session_state.uploaded_file, caption="Original Image", use_column_width=True)
+            st.image(st.session_state.uploaded_file, caption="Orijinal Fotoğraf", use_column_width=True)
         else:
             st.write("Lütfen bir resim yükleyin.")
             
@@ -233,11 +245,11 @@ def page_2():
 
     # Sağda işlem sonrası resmi göster
     with col3:
-        st.subheader("Processed Image")
+        st.subheader("İyileştirilmiş Resim")
         if st.session_state.uploaded_file is not None:
             # Check if processed_image is already in session state
             if 'processed_image' not in st.session_state:
-                with st.spinner("Processing the image..."):
+                with st.spinner("Resim İyileştiriliyor..."):
                     try:
                         image = Image.open(st.session_state.uploaded_file)
                         with NamedTemporaryFile(delete=False, suffix=".png") as temp_file:
@@ -247,7 +259,7 @@ def page_2():
                         # Call the FastAPI service for processing the image
                         processed_image = call_inpainting_service(
                             temp_image_path,
-                            "Replace the background with a scene inspired by the richness of local heritage..."
+                            "Replace the background with a scene inspired by the richness of local heritage, incorporating warm, rustic tones like wooden textures or handwoven fabrics. The background should evoke a sense of tradition and authenticity, enhancing the product's connection to its roots without overpowering its appeal."
                         )
 
                         # Klasör oluştur ve dosya kaydet
@@ -276,7 +288,7 @@ def page_2():
 
             # Display the processed image if it exists
             if st.session_state.processed_image:
-                st.image(st.session_state.processed_image, caption="Processed Image", use_column_width=True)
+                st.image(st.session_state.processed_image, caption="İyileştirilmiş Resim", use_column_width=True)
             else:
                 st.write("Resim işlenemedi. Lütfen tekrar deneyin.")
         else:
@@ -292,25 +304,18 @@ def page_2():
 # Sayfa 3: Resim seçimi
 def page_3():
     """Sayfa 3: Resim seçimi."""
-    st.title("Page 3: Select Image")
+    st.title("Resim Seçimi: Beğendiğiniz Resmi Seçiniz")
     
     if "images_array" not in st.session_state or st.session_state.images_array is None:
         image_urls = [
             "https://static.ticimax.cloud/cdn-cgi/image/width=540,quality=85/30523/uploads/urunresimleri/buyuk/biber-salcasi-1-kg-5-fed8.jpg",
             "https://memleketciftligi.com/1470-home_default/dogal-ev-yapimi-karisik-salca-1-kg-domates-biber-.jpg",
-            "https://koylukizi.com.tr/546-home_default/kaynatma-domates-salcasi-5-kg.jpg",
-            "https://memleketciftligi.com/1035-thickbox_default/dogal-karisik-koey-salcasidomates-biber-350-gr.jpg",
-            "https://www.nostalji.com.tr/wp-content/uploads/2020/05/mustlukoy-1K2B6384.png",
-            "https://aydinenginar.com/wp-content/uploads/2024/02/1851203_0-768x1024.jpg"
         ]
 
         image_paths = [
             r"Images/salca1.jpg",
             r"Images/salca2.png",
-            r"Images/salca3.jpg",
-            r"Images/salca4.jpg",
-            r"Images/salca5.jpg",
-            r"Images/salca6.jpg"
+
         ]
 
         st.session_state.images_array = [Image.open(path) for path in image_paths]
@@ -334,7 +339,7 @@ def page_3():
             st.session_state.selected_image = selected_image_
     
     with col1:
-        st.image(add_rounded_corners(st.session_state.selected_image.convert("RGB"), 30), caption="Selected Image", width=300)
+        st.image(add_rounded_corners(st.session_state.selected_image.convert("RGB"), 30), caption="Seçilen Resim", width=300)
 
     if st.button("İlerle", key="next_to_4"):
         st.session_state.page = 4
@@ -343,13 +348,13 @@ def page_3():
 
 # Sayfa 4: Son sayfa
 def page_4():
-    st.title("Page 4: Final Page")
+    st.title("Son Aşama: Ürününüzü Yüklemenize Çok Az Kaldı")
     
     col1, col2 = st.columns([3, 1])
     
     # Sol tarafta büyük resmi göster
     with col1:
-        st.image(add_rounded_corners(st.session_state.selected_image.convert("RGB"),30), caption="Large Image", use_column_width=True)
+        st.image(add_rounded_corners(st.session_state.selected_image.convert("RGB"),30), caption="Resminizin Son Hali", use_column_width=True)
     
     # Sağ tarafta text alanı göster
     with col2:

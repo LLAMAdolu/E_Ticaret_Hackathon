@@ -14,6 +14,7 @@ from unsloth import FastLanguageModel
 import json
 import difflib
 import io
+import re
 
 class VisionModel:
     def __init__(self):
@@ -54,7 +55,7 @@ class VisionModel:
         blurred_mask = self.vision_pipline.mask_processor.blur(mask_image, blur_factor=20)
         return blurred_mask
     
-# 5) Upscale İşlemi
+    # 5) Upscale İşlemi
     def upscale_image_with_realesrgan(self, input_image):
         script_path = 'E_Ticaret_Hackathon/VisionModel/Real-ESRGAN/inference_realesrgan.py'
         input_image.save("temp_input_image.png")
@@ -124,7 +125,7 @@ class ChatLLAMAdolu:
     def load_regional_dictionary(self):
         # Burada sözlüğü json dosyasından yüklüyoruz.
         try:
-            with open('../TextModel/dataset/dictionary.json', 'r', encoding='utf-8') as file:
+            with open('dataset/dictionary.json', 'r', encoding='utf-8') as file:
                 self.regional_words = json.load(file)
         except FileNotFoundError:
             print("dictionary.json dosyası bulunamadı!")
@@ -141,7 +142,8 @@ class ChatLLAMAdolu:
         
         outputs = self.model.generate(input_ids=inputs, max_new_tokens=256, use_cache=True, temperature=0.1, min_p=0.5)
         generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-        return generated_text
+        cleaned_text = self.split_text(generated_text)
+        return cleaned_text
     
     def message_formatter(self, message):
         regional_words = self.find_regional_words(message)
@@ -183,6 +185,22 @@ class ChatLLAMAdolu:
             return found_word
         else:
             return {}  # Eşleşme yoksa boş dictionary döndür
+        
+    def split_text(self, raw):
+        # Extract "Profesyonel Başlık" and "Profesyonel Açıklama" using regex
+        title_match = re.search(r'\"Profesyonel Başlık\": \"(.*?)\"', raw)
+        description_match = re.search(r'\"Profesyonel Açıklama\": \"(.*?)\"', raw)
+
+        pro_dict = {"pro_header":"", "pro_desc": ""}
+        if title_match:
+            professional_title = title_match.group(1)
+            pro_dict["pro_header"] = professional_title
+
+        if description_match:
+            professional_description = description_match.group(1)
+            pro_dict["pro_desc"] = professional_description
+
+        return pro_dict
 
     
 class UserService:
@@ -264,8 +282,9 @@ app = FastAPI()
 vision_model = VisionModel()
 chat = ChatLLAMAdolu()
 
-import logging
 from PIL import UnidentifiedImageError
+from pydantic import BaseModel
+import logging
 
 @app.post("/process-image/")
 async def process_image(input_image: UploadFile = File(...), prompt: str = Form(...)):
@@ -305,3 +324,13 @@ async def process_image(input_image: UploadFile = File(...), prompt: str = Form(
         logging.error(f"Error occurred: {str(e)}")
         return {"error": str(e)}
 
+    
+class AskModelRequest(BaseModel):
+    message: str
+
+@app.post("/ask-model/")
+async def ask_model(request: AskModelRequest):
+    message = request.message
+    res = chat.ask_model(message)
+    response = {"response": res}
+    return response
