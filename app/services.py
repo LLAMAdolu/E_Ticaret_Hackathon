@@ -1,4 +1,3 @@
-from repositories import UserRepository, ProductRepository
 import os
 import numpy as np
 from PIL import Image
@@ -145,6 +144,28 @@ class ChatLLAMAdolu:
         cleaned_text = self.split_text(generated_text)
         return cleaned_text
     
+    def ask_llamadolu(self, message):
+        messages = [
+            {
+                "role": "system",
+                "content": ""
+            },
+            {
+                "role": "user",
+                "content": message
+            },
+        ]
+        inputs = self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=True,
+            add_generation_prompt=True, # Must add for generation
+            return_tensors="pt",
+        ).to("cuda")
+        
+        outputs = self.model.generate(input_ids=inputs, max_new_tokens=256, use_cache=True, temperature=0.1, min_p=0.5)
+        generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        return generated_text
+    
     def message_formatter(self, message):
         regional_words = self.find_regional_words(message)
         content = f"Kullanıcı inputu: \"{message}\" Yöresel kelimeler: {regional_words}"
@@ -159,7 +180,10 @@ class ChatLLAMAdolu:
             },
         ]
         return messages  # Fix: Return messages for further processing
-        
+    
+    
+    
+    
     def find_regional_words(self, message):
         found_word = None
         best_similarity = 0
@@ -201,81 +225,6 @@ class ChatLLAMAdolu:
             pro_dict["pro_desc"] = professional_description
 
         return pro_dict
-
-    
-class UserService:
-    def __init__(self):
-        self.user_repo = UserRepository()
-
-    def check_login(self, username, password):
-        """
-        Check if the provided username and password are correct.
-
-        :param username: The username entered by the user.
-        :param password: The password entered by the user.
-        :return: Tuple (True, user_id) if login is successful, else (False, None).
-        """
-        user = self.user_repo.get_user_by_username(username)
-        if user:
-            user_id, db_username, db_password = user
-
-            # If passwords are stored in plain text (not recommended)
-            if password == db_password:
-                return True, user_id
-
-        return False, None
-    
-    def username_exists(self, username):
-        """
-        Check if a username exists in the database.
-
-        :param username: The username to check.
-        :return: True if the username exists, False otherwise.
-        """
-        user = self.user_repo.get_user_by_username(username)
-        return user is not None  # If a user is found, return True, else False
-
-    def register_user(self, name, username, email, password, city=None, region=None):
-        self.user_repo.create_user(name, username, email, password, city, region)
-
-    def get_user_details(self, user_id):
-        return self.user_repo.get_user(user_id)
-
-    def update_user_info(self, user_id, **kwargs):
-        self.user_repo.update_user(user_id, **kwargs)
-
-    def delete_user_account(self, user_id):
-        self.user_repo.delete_user(user_id)
-
-
-class ProductService:
-    def __init__(self):
-        self.product_repo = ProductRepository()
-
-    # Placeholder functions to improve image and text
-    def improve_image(self, image_url):
-        return f"enhanced_{image_url}"
-
-    def improve_text(self, header_text):
-        return f"Improved {header_text}"
-
-    def generate_description(self, header_text):
-        return f"Generated description for {header_text}"
-
-    def add_product(self, user_id, header_text, image_url):
-        enhanced_image = self.improve_image(image_url)
-        improved_text = self.improve_text(header_text)
-        description = self.generate_description(header_text)
-        self.product_repo.create_product(user_id, header_text, image_url, enhanced_image, description)
-
-    def get_product_info(self, product_id):
-        return self.product_repo.get_product(product_id)
-
-    def update_product_info(self, product_id, **kwargs):
-        self.product_repo.update_product(product_id, **kwargs)
-
-    def delete_product(self, product_id):
-        self.product_repo.delete_product(product_id)
 
 
 app = FastAPI()
@@ -332,5 +281,12 @@ class AskModelRequest(BaseModel):
 async def ask_model(request: AskModelRequest):
     message = request.message
     res = chat.ask_model(message)
+    response = {"response": res}
+    return response
+
+@app.post("/ask-llamadolu/")
+async def ask_llamadolu(request: AskModelRequest):
+    message = request.message
+    res = chat.ask_llamadolu(message)
     response = {"response": res}
     return response

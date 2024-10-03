@@ -1,10 +1,10 @@
 import streamlit as st
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageDraw, ImageOps, ImageEnhance
 import requests
 from io import BytesIO
 from tempfile import NamedTemporaryFile
 from streamlit_image_select import image_select
-from services import UserService
+from db_service import UserService, ProductService
 import time 
 import sys
 import os
@@ -19,20 +19,47 @@ if vision_model_path not in sys.path:
     
 from image_processing_pipeline import process_image_pipeline
 user_service = UserService()
+product_service = ProductService()
 
+# Dil seçenekleri
+language_options = ['Türkçe', 'English']
 
-# Uygulama arka plan stilini belirle
+# Sidebar'da dil seçme mekanizması ekle
+if 'language' not in st.session_state:
+    st.session_state.language = 'Türkçe'
+
+# Dil seçimi
+st.sidebar.subheader("Dil Seçin / Choose Language")
+selected_language = st.sidebar.selectbox("Dil / Language", language_options)
+
+# Dil seçimi değişirse session state'i güncelle
+if selected_language != st.session_state.language:
+    st.session_state.language = selected_language
+    st.rerun()
+
 st.markdown(
     """
     <style>
-    .stApp {
-        background: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), 
-                    url("https://www.gidamuhendisleri.org.tr/wp-content/uploads/2021/08/organik_gida_ihracat-1-1110x628.jpg");
-        background-size: cover;
+    .bg-image {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.7)), 
+                    url("https://www.gidamuhendisleri.org.tr/wp-content/uploads/2021/08/organik_gida_ihracat-1-1110x628.jpg");        background-size: cover;
         background-position: center;
         background-attachment: fixed;
+        filter: blur(15px);
+        z-index: -1;
+    }
+
+    /* İçeriği ön planda tutmak için */
+    .stApp {
+        z-index: 0;
     }
     </style>
+    <div class="bg-image"></div>
     """,
     unsafe_allow_html=True
 )
@@ -72,6 +99,9 @@ def call_inpainting_service(image_path, prompt):
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
     
+if 'user_input' not in st.session_state:
+    st.session_state['user_input'] = ""
+    
 if 'page' not in st.session_state:
     st.session_state.page = "login"
 
@@ -80,6 +110,18 @@ if 'navigation_initialized' not in st.session_state:
 
 if 'users' not in st.session_state:
     st.session_state['users'] = {}  # Basit bir kullanıcı veritabanı
+    
+if 'user_id' not in st.session_state:
+    st.session_state['user_id'] = -1
+    
+if 'improved_header' not in st.session_state:
+    st.session_state['improved_header'] = ""
+    
+if 'improved_desc' not in st.session_state:
+    st.session_state['improved_desc'] = ""
+    
+if 'image_path' not in st.session_state:
+    st.session_state['image_path'] = ""
 
 # Yardımcı fonksiyonlar
 def load_image_from_url(url):
@@ -221,7 +263,7 @@ def page_2():
     """Sayfa 2: Yüklenen resmi işleyip sonuçları gösterir."""
     st.title("Görüntü İyileştirme: Öncesi ve Sonrası")
     
-    col1, col2, col3 = st.columns([2,1,2])
+    col1, col2, col3 = st.columns([2, 1, 2])
 
     # Solda yüklenen dosyanın resmini göster
     with col1:
@@ -231,18 +273,6 @@ def page_2():
         else:
             st.write("Lütfen bir resim yükleyin.")
             
-    with col2:
-        # Kaydırma çubukları ve butonlar
-        slider1 = st.slider("Slider 1", 0, 100, 50)
-        slider2 = st.slider("Slider 2", 0, 100, 50)
-        slider3 = st.slider("Slider 3", 0, 100, 50)
-        
-        button_cols = st.columns(4)
-        for i in range(4):
-            with button_cols[i]:
-                if st.button(f"{i+1}"):
-                    st.write(f"{i+1} pressed")        
-
     # Sağda işlem sonrası resmi göster
     with col3:
         st.subheader("İyileştirilmiş Resim")
@@ -278,6 +308,7 @@ def page_2():
                         # Dosya yolunu oluştur ve kaydet
                         save_path = os.path.join(folder_path, new_filename)
                         processed_image.save(save_path)
+                        st.session_state["image_path"] = str(save_path)
                         
                         # İşlenen resmi session_state'e kaydet
                         st.session_state.processed_image = processed_image
@@ -286,69 +317,113 @@ def page_2():
                         st.error(f"Error processing image: {e}")
                         st.session_state.processed_image = None
 
-            # Display the processed image if it exists
+            # Display the processed image if it exists and allow further adjustments
             if st.session_state.processed_image:
                 st.image(st.session_state.processed_image, caption="İyileştirilmiş Resim", use_column_width=True)
+                
+                # Slider for color enhancement
+                sharpen_value = st.slider("Renk Keskinleştirme", 0.5, 3.0, 1.0, step=0.1)
+                enhancer_color = ImageEnhance.Color(st.session_state.processed_image)
+                sharpened_image = enhancer_color.enhance(sharpen_value)  # Renkleri keskinleştir
+
+                # Slider for contrast enhancement
+                contrast_value = st.slider("Kontrast Artırma", 0.5, 3.0, 1.0, step=0.1)
+                enhancer_contrast = ImageEnhance.Contrast(sharpened_image)
+                contrasted_image = enhancer_contrast.enhance(contrast_value)  # Kontrastı artır
+
+                # Save the enhanced image to session state
+                st.session_state.processed_image = contrasted_image
+                
+                # Show the final enhanced image
+                st.image(st.session_state.processed_image, caption="Geliştirilmiş Resim", use_column_width=True)
             else:
                 st.write("Resim işlenemedi. Lütfen tekrar deneyin.")
         else:
             st.write("İşlenecek bir resim yükleyin.")
 
-    # Sonraki adım butonu
-    if st.button("İlerle", key="next_to_3"):
+    # "Resmi tekrar geliştir" butonu
+    if st.button("Resmi tekrar geliştir", key="next_to_3"):
         st.session_state.page = 3
         st.rerun()
 
+    # "Son adıma atla" butonu
+    if st.button("Son adıma atla"):
+        # Save processed image for use in page_4
+        st.session_state.selected_image = st.session_state.processed_image
+        st.session_state.page = 4
+        st.rerun()
 
+    # Reset butonu: Resmi ilk haline geri döndür
+    if st.button("Reset"):
+        st.session_state.processed_image = st.session_state.uploaded_file  # Orijinal resmi geri yükle
+        st.rerun()  # Sayfayı yeniden yükleyerek slider değerlerini sıfırlayacak
 
 # Sayfa 3: Resim seçimi
 def page_3():
     """Sayfa 3: Resim seçimi."""
     st.title("Resim Seçimi: Beğendiğiniz Resmi Seçiniz")
     
-    if "images_array" not in st.session_state or st.session_state.images_array is None:
-        image_urls = [
-            "https://static.ticimax.cloud/cdn-cgi/image/width=540,quality=85/30523/uploads/urunresimleri/buyuk/biber-salcasi-1-kg-5-fed8.jpg",
-            "https://memleketciftligi.com/1470-home_default/dogal-ev-yapimi-karisik-salca-1-kg-domates-biber-.jpg",
-        ]
-
-        image_paths = [
-            r"Images/salca1.jpg",
-            r"Images/salca2.png",
-
-        ]
-
-        st.session_state.images_array = [Image.open(path) for path in image_paths]
-
+    # Initialize the image selection if it hasn't been initialized yet
     if "selected_image" not in st.session_state:
-        st.session_state.selected_image = st.session_state.images_array[0]
-    
-    if "images_array" in st.session_state and st.session_state.images_array:
-        st.session_state.images_array[0] = raw_output_image
-        st.session_state.selected_image = raw_output_image
+        st.session_state.selected_image = st.session_state['processed_image']  # Default to processed image from page_2
+
+    # Process the "Tekrar İşlenmiş Resim" immediately if it hasn't been processed yet
+    if 'processed_image_2' not in st.session_state or st.session_state['processed_image_2'] is None:
+        with st.spinner("Resim tekrar işleniyor..."):
+            try:
+                image = Image.open(st.session_state['uploaded_file'])
+                with NamedTemporaryFile(delete=False, suffix=".png") as temp_file:
+                    image.save(temp_file.name)
+                    temp_image_path = temp_file.name
+
+                # Call the FastAPI service for re-processing the image
+                st.session_state['processed_image_2'] = call_inpainting_service(
+                    temp_image_path,
+                    "Replace the background with a soft, neutral-colored surface that complements the product, such as a subtle wood grain or lightly textured stone. Ensure the background is slightly blurred to keep the focus on the product, providing a warm, natural feel that enhances the product's appeal without being distracting."
+                )
+            except Exception as e:
+                st.error(f"Error processing image: {e}")
 
     col1, col2 = st.columns([3, 1])
-    
-    with col2:
-        selected_image_ = image_select(
-            label="",
-            images=st.session_state.images_array,
-            use_container_width=True
-        )
-        if selected_image_:
-            st.session_state.selected_image = selected_image_
-    
-    with col1:
-        st.image(add_rounded_corners(st.session_state.selected_image.convert("RGB"), 30), caption="Seçilen Resim", width=300)
 
+    # Sol tarafta seçilen resim
+    with col1:
+        st.subheader("Seçilen Resim")
+        if st.session_state.selected_image:
+            st.image(st.session_state.selected_image, caption="Seçilen Resim", use_column_width=True)
+        else:
+            st.write("Bir resim seçilmedi.")
+
+    # Sağ tarafta üstte ilk yüklenen resmi göster
+    with col2:
+        st.subheader("Orijinal Yüklenen Resim")
+        if 'uploaded_file' in st.session_state:
+            if st.button("Bu Resmi Seç"):
+                st.session_state.selected_image = st.session_state['uploaded_file']  # Set selected image
+                st.rerun()
+            st.image(st.session_state['uploaded_file'], caption="İlk Yüklenen Resim", use_column_width=True)
+        else:
+            st.write("Lütfen önce bir resim yükleyin.")
+
+    # Sağ tarafta altta işlenmiş ikinci resmi göster
+    with col2:
+        st.subheader("Tekrar İşlenmiş Resim")
+        if st.session_state['processed_image_2']:
+            st.image(st.session_state['processed_image_2'], caption="Tekrar İyileştirilmiş Resim", use_column_width=True)
+            if st.button("Bu Resmi Seç", key="processed_2_select"):
+                st.session_state.selected_image = st.session_state['processed_image_2']  # Set selected image
+                st.rerun()
+
+    # İlerle butonu
     if st.button("İlerle", key="next_to_4"):
         st.session_state.page = 4
         st.rerun()
 
 
+        
 # Sayfa 4: Son sayfa
 def page_4():
-    st.title("Son Aşama: Ürününüzü Yüklemenize Çok Az Kaldı")
+    st.title("Son Aşama")
     
     col1, col2 = st.columns([3, 1])
     
@@ -378,15 +453,27 @@ def page_4():
                 generated_text = f"Error: {response.status_code}, {response.text}"
             
         st.subheader("Önerilen Ürün Adı ")
-        st.write(generated_text)
+        st.write(generated_text["pro_header"])
         st.subheader("Önerilen Ürün Açıklaması")
-        st.write("Mükemmel yüzde yüz organik salça. Satışını artıracak kelimelerin kullanıldığı ürün bilgisi.")
+        st.write(generated_text["pro_desc"])
+        
+        st.session_state["improved_header"] = generated_text["pro_header"]
+        st.session_state["improved_desc"] = generated_text["pro_desc"]
         
         # "Onayla" button at the bottom
         if st.button("Onayla"):
+            user_id = st.session_state["user_id"]
+            header_text = st.session_state["improved_header"]
+            image_path = st.session_state["image_path"]
+            print("SAVE PATH: " + image_path)
+            description = st.session_state["improved_desc"]
+            product_service.add_product(user_id, header_text, image_path, description)
             st.write("You have confirmed the information.")
-            # Daha fazla mantık eklenebilir (örneğin, kaydetme veya gönderme işlemleri)
-
+            
+            st.session_state.page = "My Products"  # "Ürünlerim" sayfasına yönlendirme
+            st.rerun()
+            
+            
 # Sayfa yönlendirme
 def navigation():
     st.markdown(
@@ -465,6 +552,7 @@ else:
     elif st.session_state.page == 4:
         navigation()
         page_4()
+    # Eğer ürünlerim sayfası seçilirse
     elif st.session_state.page == "My Products":
         products.show_products()
     elif st.session_state.page == "All Products":
@@ -493,14 +581,13 @@ with st.sidebar:
             st.session_state.page = 1  # Başarıyla giriş yapıldıysa ana sayfaya yönlendir
             st.rerun()
         else:
-            st.write("Lütfen Giriş Yapınız")
+            st.error("Lütfen Giriş Yapınız")
     if st.button("Ürünlerim", key = "Ürünlerim_sidebar"):
         if st.session_state['logged_in'] == True:
             st.session_state.page = "My Products"  # Başarıyla giriş yapıldıysa ana sayfaya yönlendir
             st.rerun()
         else:
-            st.write("Lütfen Giriş Yapınız")
+            st.error("Lütfen Giriş Yapınız")
     if st.button("Tüm Ürünler", key = "TümÜrünler_sidebar"):
         st.session_state.page = "All Products"  # Başarıyla giriş yapıldıysa ana sayfaya yönlendir
         st.rerun()
-        st.write("Lütfen Giriş Yapınız")

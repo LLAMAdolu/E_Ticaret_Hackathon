@@ -1,4 +1,7 @@
 from unsloth import FastLanguageModel
+import json
+import difflib
+import re
 
 class ChatLLAMAdolu:
     def __init__(self):
@@ -6,6 +9,7 @@ class ChatLLAMAdolu:
         self.dtype = None # None for auto detection. Float16 for Tesla T4, V100, Bfloat16 for Ampere+
         self.load_in_4bit = False # Use 4bit quantization to reduce memory usage. Can be False.
         self.init_model()
+        self.load_regional_dictionary() 
     
     def init_model(self):
         self.model, self.tokenizer = FastLanguageModel.from_pretrained(
@@ -15,6 +19,15 @@ class ChatLLAMAdolu:
             load_in_4bit = self.load_in_4bit,
         )
         FastLanguageModel.for_inference(self.model) # Enable native 2x faster inference
+        
+    def load_regional_dictionary(self):
+        # Burada sözlüğü json dosyasından yüklüyoruz.
+        try:
+            with open('dataset/dictionary.json', 'r', encoding='utf-8') as file:
+                self.regional_words = json.load(file)
+        except FileNotFoundError:
+            print("dictionary.json dosyası bulunamadı!")
+            self.regional_words = []    
         
     def ask_model(self, message):
         messages = self.message_formatter(message)
@@ -27,7 +40,8 @@ class ChatLLAMAdolu:
         
         outputs = self.model.generate(input_ids=inputs, max_new_tokens=256, use_cache=True, temperature=0.1, min_p=0.5)
         generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-        return generated_text
+        cleaned_text = self.split_text(generated_text)
+        return cleaned_text
     
     def message_formatter(self, message):
         regional_words = self.find_regional_words(message)
@@ -45,15 +59,44 @@ class ChatLLAMAdolu:
         return messages  # Fix: Return messages for further processing
         
     def find_regional_words(self, message):
-        found_words = []
-        words_in_message = message.split()
-
+        found_word = None
+        best_similarity = 0
+    
+        words_in_message = message.split()  # Mesajdaki kelimeleri böl
+    
+        # Her bir sözlük kaydını tara
         for entry in self.regional_words:
-            word = entry["Kelime"].lower()
+            regional_word = entry["Kelime"].lower()  # Küçük harfe çevir
             for message_word in words_in_message:
-                message_word_lower = message_word.lower()
-                
-                if word in message_word_lower:
-                    found_words.append(entry)
+                message_word_lower = message_word.lower()  # Mesajdaki kelimeyi küçük harfe çevir
+            
+                # Benzerlik oranını hesapla
+                similarity = difflib.SequenceMatcher(None, regional_word, message_word_lower).ratio()
+            
+                # Eğer benzerlik oranı en yüksek ise, onu al
+                if similarity > best_similarity:
+                    best_similarity = similarity
+                    found_word = entry
 
-        return found_words
+        # Eğer bir eşleşme bulduysak, en iyi sonucu döndür
+        if found_word and best_similarity > 0.6:  # Eşik değeri %60
+            return found_word
+        else:
+            return {}  # Eşleşme yoksa boş dictionary döndür
+        
+        
+    def split_text(self, raw):
+        # Extract "Profesyonel Başlık" and "Profesyonel Açıklama" using regex
+        title_match = re.search(r'\"Profesyonel Başlık\": \"(.*?)\"', raw)
+        description_match = re.search(r'\"Profesyonel Açıklama\": \"(.*?)\"', raw)
+
+        pro_dict = {"pro_header":"", "pro_desc": ""}
+        if title_match:
+            professional_title = title_match.group(1)
+            pro_dict["pro_header"] = professional_title
+
+        if description_match:
+            professional_description = description_match.group(1)
+            pro_dict["pro_desc"] = professional_description
+        
+        return pro_dict
